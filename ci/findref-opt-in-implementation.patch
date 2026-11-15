@@ -1,0 +1,160 @@
+diff --git a/docs/plugin-sdk/FIND_REF.md b/docs/plugin-sdk/FIND_REF.md
+index a422091ad..8b0f925d8 100644
+--- a/docs/plugin-sdk/FIND_REF.md
++++ b/docs/plugin-sdk/FIND_REF.md
+@@ -3,6 +3,9 @@
+ Since 0.9.99, a startup `libraryBooks` provider can opt in with
+ `referenceSearch: true` (boolean, default false). Its `when` condition and
+ startup-contribution permissions still apply. Existing providers remain unchanged.
++Without an opted-in provider, the dialog retains its native row presentation,
++query restoration and result cache. Native result tiles also retain their original
++presentation when external references are present.
+ 
+ The host targets `findRef.external.requested` to the provider's plugin with
+ `{requestId, provider, query, limit}`. Respond using `reader.respondFindRef`:
+diff --git a/lib/find_ref/bloc/find_ref_bloc.dart b/lib/find_ref/bloc/find_ref_bloc.dart
+index 318bf5bce..b58142b86 100644
+--- a/lib/find_ref/bloc/find_ref_bloc.dart
++++ b/lib/find_ref/bloc/find_ref_bloc.dart
+@@ -34,7 +34,6 @@ class FindRefBloc extends Bloc<FindRefEvent, FindRefState> {
+   bool? _shownIncludePersonalBooks;
+   HiddenLibrarySelection? _shownVisibility;
+   int _requestGeneration = 0;
+-  _FindRefDelay? _searchDelay;
+   _FindRefDelay? _externalDelay;
+   bool _closing = false;
+   SearchRefRequested? _lastRequest;
+@@ -91,7 +90,6 @@ class FindRefBloc extends Bloc<FindRefEvent, FindRefState> {
+   Future<void> close() async {
+     _closing = true;
+     _requestGeneration++;
+-    _searchDelay?.cancel();
+     _externalDelay?.cancel();
+     externalService.cancel(this);
+     _liveBlocs.remove(this);
+@@ -129,7 +127,6 @@ class FindRefBloc extends Bloc<FindRefEvent, FindRefState> {
+         : const HiddenLibrarySelection();
+     // גם שימוש בתוצאה קיימת מבטל רענון אישי שהתחיל בבקשה אחרת.
+     findRefRepository.cancelPendingSearch();
+-    _searchDelay?.cancel();
+     if (event.refText.length >= 2 &&
+         state is FindRefSuccess &&
+         normalized == _shownNormalizedQuery &&
+@@ -154,13 +151,8 @@ class FindRefBloc extends Bloc<FindRefEvent, FindRefState> {
+     // debounce: ממתינים לפני שמתחילים ב-fetch. אם המשתמש מקליד שוב לפני
+     // שהדיליי מסתיים — restartable יבטל את ה-handler הזה כאן בלי שיתחיל
+     // לטעון נתונים.
+-    final delay = _FindRefDelay(_searchDebounce);
+-    _searchDelay = delay;
+-    final elapsed = await delay.done;
+-    if (identical(_searchDelay, delay)) _searchDelay = null;
+-    if (!elapsed || emit.isDone || requestGeneration != _requestGeneration) {
+-      return;
+-    }
++    await Future.delayed(_searchDebounce);
++    if (emit.isDone || requestGeneration != _requestGeneration) return;
+ 
+     emit(FindRefLoading());
+     try {
+@@ -187,8 +179,7 @@ class FindRefBloc extends Bloc<FindRefEvent, FindRefState> {
+       );
+       // A provider is optional. Its failure must never block native results.
+       if (event.refText.trim().length >= 3 && externalService.hasProviders) {
+-        // Reference parsing in Responsa uses a Windows dialog. Do not submit
+-        // transient keystrokes to it; wait for a brief pause after local hits.
++        // ממתינים להפסקת ההקלדה לפני שמשגרים שאילתה לספק החיצוני.
+         unawaited(_searchExternal(event.refText, requestGeneration));
+       }
+     } on ReferenceLibraryNotReadyException {
+@@ -227,7 +218,6 @@ class FindRefBloc extends Bloc<FindRefEvent, FindRefState> {
+   ) {
+     _lastRequest = null;
+     _requestGeneration++;
+-    _searchDelay?.cancel();
+     _externalDelay?.cancel();
+     externalService.cancel(this);
+     findRefRepository.cancelPendingSearch();
+diff --git a/lib/find_ref/view/find_ref_dialog.dart b/lib/find_ref/view/find_ref_dialog.dart
+index 13cd06af2..34ba4fa0d 100644
+--- a/lib/find_ref/view/find_ref_dialog.dart
++++ b/lib/find_ref/view/find_ref_dialog.dart
+@@ -233,7 +233,9 @@ class _FindRefDialogState extends State<FindRefDialog> {
+         baseOffset: 0,
+         extentOffset: controller.text.length,
+       );
+-      _dispatchSearch(controller.text);
++      if (_findRefBloc.externalService.hasProviders) {
++        _dispatchSearch(controller.text);
++      }
+     }
+ 
+     // רישום כ-active restorer כדי שהדיאלוג יקבל שחזור פוקוס לאחר אירועי חלון
+@@ -255,7 +257,13 @@ class _FindRefDialogState extends State<FindRefDialog> {
+ 
+   @override
+   void dispose() {
+-    if (!_findRefBloc.isClosed) _findRefBloc.add(ClearSearchRequested());
++    final state = _findRefBloc.state;
++    if (!_findRefBloc.isClosed &&
++        (_findRefBloc.externalService.hasProviders ||
++            state is FindRefSuccess &&
++                (state.externalPending || state.externalRefs.isNotEmpty))) {
++      _findRefBloc.add(ClearSearchRequested());
++    }
+     _personalBooksChanges?.cancel();
+     _localVisibilityChanges?.cancel();
+     _resultsScrollController.removeListener(_updateHasMoreBelow);
+@@ -1259,26 +1267,15 @@ class _FindRefDialogState extends State<FindRefDialog> {
+               color: colorScheme.onSurface,
+             ),
+           ),
+-          subtitle: Row(
+-            children: [
+-              Text(
+-                context.settingsText('אוצריא'),
+-                style: Theme.of(context).textTheme.bodySmall,
+-              ),
+-              if (ref.bookPath.isNotEmpty) ...[
+-                const SizedBox(width: AppTokens.spaceSM),
+-                Expanded(
+-                  child: LibraryOverflowTooltipText(
+-                    text: ref.bookPath,
+-                    maxLines: 1,
+-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+-                      color: colorScheme.onSurfaceVariant,
+-                    ),
++          subtitle: ref.bookPath.isEmpty
++              ? null
++              : LibraryOverflowTooltipText(
++                  text: ref.bookPath,
++                  maxLines: 1,
++                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
++                    color: colorScheme.onSurfaceVariant,
+                   ),
+                 ),
+-              ],
+-            ],
+-          ),
+           // רשימת המפרשים נטענת אחרי הרינדור, ולכן הופעת הכפתור הייתה מצמצמת
+           // את רוחב הכותרת ומזיזה את הטקסט. השורה שומרת את מקומו מהפריים
+           // הראשון לפי `eligible`, שידוע סינכרונית.
+diff --git a/windows/CMakeLists.txt b/windows/CMakeLists.txt
+index f5e98ce46..5d7dff4f7 100644
+--- a/windows/CMakeLists.txt
++++ b/windows/CMakeLists.txt
+@@ -156,15 +156,6 @@ install(DIRECTORY "${CMAKE_SOURCE_DIR}/../installer/vcredist/${VCREDIST_ARCH}/"
+   COMPONENT Runtime
+   FILES_MATCHING PATTERN "*.dll")
+ 
+-# The WebView plugin imports this DLL but does not bundle it. Install the matching
+-# NuGet loader so portable background plugins do not depend on another app's DLLs.
+-if(TARGET flutter_inappwebview_windows_plugin)
+-  install(FILES
+-    "${CMAKE_BINARY_DIR}/packages/Microsoft.Web.WebView2/build/native/${VCREDIST_ARCH}/WebView2Loader.dll"
+-    DESTINATION "${CMAKE_INSTALL_PREFIX}"
+-    COMPONENT Runtime)
+-endif()
+-
+ # ONNX Runtime for semantic search, in its own folder: System32 may hold an
+ # older onnxruntime.dll, so the app passes this file's full path explicitly.
+ include("${CMAKE_SOURCE_DIR}/../tool/onnxruntime/onnxruntime.cmake")
