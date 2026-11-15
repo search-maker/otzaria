@@ -1,0 +1,70 @@
+name: Note render regression validation
+
+on:
+  push:
+    branches: [codex/ci-note-validation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: a9c534081a99877d0753f1f4b39c4ee18eab0bab
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Generate tracked settings files
+        run: |
+          dart run tool/generate_search_index.dart
+          dart run tool/generate_settings_l10n.dart
+      - name: Reproduce the exact existing failure
+        run: |
+          set +e
+          flutter test --no-pub test/text_book/utils/note_inline_render_test.dart --plain-name 'קישור inline נשאר במקומו אחרי סמן חלוקה מוקדם' --reporter expanded > baseline.log 2>&1
+          result=$?
+          set -e
+          cat baseline.log
+          test "$result" -ne 0
+          grep -F 'Expected: a string starting with' baseline.log
+          grep -F 'section-marker' baseline.log
+      - name: Update the precise assertion to the upstream marker contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('test/text_book/utils/note_inline_render_test.dart')
+          source = path.read_text()
+          old = "    expect(html, startsWith('<b>[א]</b> אבגד $linkOpenהוזח</a> '));"
+          new = "    expect(html, startsWith('<b class=\"section-marker\">[א]</b> אבגד $linkOpenהוזח</a> '));"
+          assert source.count(old) == 1
+          path.write_text(source.replace(old, new))
+          PY
+          dart format test/text_book/utils/note_inline_render_test.dart
+          git diff --check
+          git diff -- test/text_book/utils/note_inline_render_test.dart > validated-fix.patch
+      - name: Verify note rendering and structural marker tests
+        run: |
+          set -o pipefail
+          flutter test --no-pub --reporter expanded test/text_book/utils/note_inline_render_test.dart test/text_book/utils/inline_section_markers_test.dart test/book_common/selection/structural_selection_test.dart 2>&1 | tee fixed.log
+      - name: Analyze the fixed source
+        run: |
+          set -o pipefail
+          flutter analyze --no-pub 2>&1 | tee analyze.log
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: validated-note-render-fix
+          path: |
+            baseline.log
+            fixed.log
+            analyze.log
+            validated-fix.patch
