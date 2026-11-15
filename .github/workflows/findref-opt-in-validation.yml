@@ -23,7 +23,9 @@ jobs:
           flutter-version: 3.47.7
           cache: true
       - name: Use the latest dev dependency pins
-        run: git restore --source=c5036887915ab64e708c547bb837f2a985e2dd4e -- pubspec.yaml pubspec.lock
+        run: |
+          git fetch --no-tags https://github.com/Otzaria/otzaria.git c5036887915ab64e708c547bb837f2a985e2dd4e
+          git restore --source=c5036887915ab64e708c547bb837f2a985e2dd4e -- pubspec.yaml pubspec.lock
       - run: flutter pub get --enforce-lockfile
       - name: Generate tracked settings files
         run: |
