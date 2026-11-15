@@ -1,5 +1,5 @@
 diff --git a/test/find_ref/find_ref_dialog_view_test.dart b/test/find_ref/find_ref_dialog_view_test.dart
-index 0cc74bfe5..98d53cceb 100644
+index 0cc74bfe5..06a069a71 100644
 --- a/test/find_ref/find_ref_dialog_view_test.dart
 +++ b/test/find_ref/find_ref_dialog_view_test.dart
 @@ -323,6 +323,78 @@ void main() {
@@ -104,10 +104,11 @@ index 0cc74bfe5..98d53cceb 100644
      testWidgets('external rows support page keys and Ctrl Home/End', (
        tester,
      ) async {
-@@ -520,6 +608,7 @@ void main() {
+@@ -520,6 +608,8 @@ void main() {
          events.where((e) => e.topic == PluginFindRefService.openTopic),
          isEmpty,
        );
++      await tester.pumpWidget(const SizedBox.shrink());
 +      await tester.pump(_pastDebounce);
      });
    });
