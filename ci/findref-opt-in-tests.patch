@@ -1,8 +1,57 @@
+diff --git a/test/find_ref/external_find_ref_test.dart b/test/find_ref/external_find_ref_test.dart
+index cff0642f9..219d66a4f 100644
+--- a/test/find_ref/external_find_ref_test.dart
++++ b/test/find_ref/external_find_ref_test.dart
+@@ -1,4 +1,6 @@
+ import 'dart:async';
++import 'dart:async';
++
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:otzaria/find_ref/bloc/find_ref_bloc.dart';
+ import 'package:otzaria/find_ref/bloc/find_ref_event.dart';
+@@ -206,4 +208,37 @@ void main() {
+       expect(result.externalPending, false);
+     },
+   );
++
++  test('reusing a normalized query keeps its pending provider reply', () async {
++    final requested = Completer<Map<String, dynamic>>();
++    var requests = 0;
++    final service = PluginFindRefService.forTesting(
++      providers: () => [provider],
++      dispatch: (_, topic, data) async {
++        if (topic == PluginFindRefService.requestTopic) {
++          requests++;
++          requested.complete(data);
++        }
++      },
++    );
++    final bloc = FindRefBloc(
++      findRefRepository: _Repository(),
++      externalService: service,
++    );
++    addTearDown(bloc.close);
++    bloc.add(const SearchRefRequested('בראשית'));
++    final request = await requested.future.timeout(const Duration(seconds: 5));
++    final cached = bloc.state;
++    bloc.add(const SearchRefRequested('בראשית '));
++    await pumpEventQueue();
++    expect(bloc.state, same(cached));
++    final completed = bloc.stream.firstWhere(
++      (state) => state is FindRefSuccess && !state.externalPending,
++    );
++    expect(service.respond('barilan', request['requestId'] as String, results: rows), true);
++    final result = await completed.timeout(const Duration(seconds: 5)) as FindRefSuccess;
++    expect(result.refs.single.title, 'בראשית');
++    expect(result.externalRefs.single.reference, 'בראשית א ב');
++    expect(requests, 1);
++  });
+ }
 diff --git a/test/find_ref/find_ref_dialog_view_test.dart b/test/find_ref/find_ref_dialog_view_test.dart
-index 0cc74bfe5..06a069a71 100644
+index 0cc74bfe5..d425cf093 100644
 --- a/test/find_ref/find_ref_dialog_view_test.dart
 +++ b/test/find_ref/find_ref_dialog_view_test.dart
-@@ -323,6 +323,78 @@ void main() {
+@@ -323,6 +323,80 @@ void main() {
      Settings.setValue<bool>('key-find-ref-include-personal-books', false);
    });
  
@@ -68,7 +117,9 @@ index 0cc74bfe5..06a069a71 100644
 +        await tester.pump(_pastDebounce);
 +        await tester.pumpAndSettle();
 +        expect(repository.calls, 1);
-+        final bloc = tester.element(find.byType(FindRefDialog)).read<FindRefBloc>();
++        final bloc = tester
++            .element(find.byType(FindRefDialog))
++            .read<FindRefBloc>();
 +        final cached = bloc.state;
 +        await tester.pumpWidget(const SizedBox.shrink());
 +        await tester.pump(_pastDebounce);
@@ -81,7 +132,7 @@ index 0cc74bfe5..06a069a71 100644
    group('native external references', () {
      const provider = PluginLibraryBookProvider(
        pluginId: 'barilan',
-@@ -369,6 +441,22 @@ void main() {
+@@ -369,6 +443,23 @@ void main() {
        );
      }
  
@@ -92,7 +143,8 @@ index 0cc74bfe5..06a069a71 100644
 +      await tester.pump(_pastDebounce);
 +      await tester.pump(const Duration(milliseconds: 700));
 +      expect(
-+        events.singleWhere((e) => e.topic == PluginFindRefService.requestTopic)
++        events
++            .singleWhere((e) => e.topic == PluginFindRefService.requestTopic)
 +            .data['query'],
 +        'בראשית',
 +      );
@@ -104,7 +156,7 @@ index 0cc74bfe5..06a069a71 100644
      testWidgets('external rows support page keys and Ctrl Home/End', (
        tester,
      ) async {
-@@ -520,6 +608,8 @@ void main() {
+@@ -520,6 +611,8 @@ void main() {
          events.where((e) => e.topic == PluginFindRefService.openTopic),
          isEmpty,
        );
