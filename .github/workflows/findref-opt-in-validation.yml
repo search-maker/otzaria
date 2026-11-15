@@ -22,6 +22,8 @@ jobs:
           channel: stable
           flutter-version: 3.47.7
           cache: true
+      - name: Use the latest dev dependency pins
+        run: git restore --source=c5036887915ab64e708c547bb837f2a985e2dd4e -- pubspec.yaml pubspec.lock
       - run: flutter pub get --enforce-lockfile
       - name: Generate tracked settings files
         run: |
@@ -58,7 +60,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import json, subprocess
-          base = 'cffc03f94a8d5b64225ab562da13c3127cc5e828'
+          base = 'c5036887915ab64e708c547bb837f2a985e2dd4e'
           original = subprocess.check_output(['git','show',base+':lib/find_ref/view/find_ref_dialog.dart'], text=True)
           current = Path('lib/find_ref/view/find_ref_dialog.dart').read_text()
           def tile(source):
