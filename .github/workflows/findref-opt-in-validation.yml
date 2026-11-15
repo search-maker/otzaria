@@ -40,6 +40,7 @@ jobs:
           grep -F 'אוצריא' before.log
       - name: Reproduce the personal refresh cancellation regression
         run: |
+          git show fc597da66522833227e24cfdea084bcd4a7bcde3:lib/find_ref/bloc/find_ref_bloc.dart > lib/find_ref/bloc/find_ref_bloc.dart
           set +e
           flutter test --no-pub --reporter expanded test/find_ref/find_ref_personal_books_refresh_test.dart --name 'reusing non-personal results cancels a personal refresh in debounce' > personal-before.log 2>&1
           result=$?
@@ -48,6 +49,7 @@ jobs:
           test "$result" -ne 0
           grep -F 'Expected: FindRefSuccess' personal-before.log
           grep -F 'Actual: FindRefSuccess' personal-before.log
+          git restore -- lib/find_ref/bloc/find_ref_bloc.dart
       - name: Apply the opt-in-only implementation
         run: |
           git apply ci/findref-opt-in-implementation.patch
