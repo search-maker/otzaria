@@ -38,6 +38,16 @@ jobs:
           test "$result" -ne 0
           grep -F 'Expected: no matching candidates' before.log
           grep -F 'אוצריא' before.log
+      - name: Reproduce the personal refresh cancellation regression
+        run: |
+          set +e
+          flutter test --no-pub --reporter expanded test/find_ref/find_ref_personal_books_refresh_test.dart --name 'reusing non-personal results cancels a personal refresh in debounce' > personal-before.log 2>&1
+          result=$?
+          set -e
+          cat personal-before.log
+          test "$result" -ne 0
+          grep -F 'Expected: FindRefSuccess' personal-before.log
+          grep -F 'Actual: FindRefSuccess' personal-before.log
       - name: Apply the opt-in-only implementation
         run: |
           git apply ci/findref-opt-in-implementation.patch
@@ -59,7 +69,7 @@ jobs:
       - name: Verify original and opted-in provider contracts
         run: |
           set -o pipefail
-          flutter test --no-pub --concurrency=1 --reporter expanded test/find_ref/external_find_ref_test.dart test/find_ref/find_ref_dialog_view_test.dart test/find_ref/find_ref_bloc_test.dart test/find_ref/find_ref_debounce_test.dart test/find_ref/find_ref_cancellation_test.dart test/plugins/services/plugin_library_books_registry_test.dart test/plugins/services/plugin_extended_validator_startup_test.dart test/plugins/models/plugin_api_catalog_test.dart test/plugins/bridge/plugin_bridge_adapter_test.dart test/design_system/ui_lint_test.dart 2>&1 | tee after.log
+          flutter test --no-pub --concurrency=1 --reporter expanded test/find_ref/ test/plugins/services/plugin_library_books_registry_test.dart test/plugins/services/plugin_extended_validator_startup_test.dart test/plugins/models/plugin_api_catalog_test.dart test/plugins/bridge/plugin_bridge_adapter_test.dart test/design_system/ui_lint_test.dart 2>&1 | tee after.log
       - name: Analyze the narrowed source
         run: |
           set -o pipefail
@@ -72,13 +82,14 @@ jobs:
           assert not data['new'] and not data['problems'] and not data['dead_baseline']
           PY
       - name: Export the verified patch
-        run: git diff --binary -- docs/plugin-sdk/FIND_REF.md lib/find_ref/bloc/find_ref_bloc.dart lib/find_ref/view/find_ref_dialog.dart test/find_ref/find_ref_dialog_view_test.dart windows/CMakeLists.txt > validated-narrow.patch
+        run: git diff --binary fc597da66522833227e24cfdea084bcd4a7bcde3 -- docs/plugin-sdk/FIND_REF.md lib/find_ref/bloc/find_ref_bloc.dart lib/find_ref/view/find_ref_dialog.dart test/find_ref/find_ref_dialog_view_test.dart windows/CMakeLists.txt > validated-narrow.patch
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: validated-findref-opt-in
           path: |
             before.log
+            personal-before.log
             after.log
             analyze.log
             ui-lint.json
